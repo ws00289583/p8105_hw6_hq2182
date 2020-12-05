@@ -9,6 +9,7 @@ output: github_document
 library(tidyverse)
 library(viridis)
 library(modelr)
+library(mgcv)
 library(p8105.datasets)
 
 knitr::opts_chunk$set(
@@ -28,6 +29,8 @@ scale_colour_discrete = scale_colour_viridis_d
 scale_fill_discrete = scale_fill_viridis_d
 
 theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+set.seed(1)
 ```
 
 ### Problem 1
@@ -122,3 +125,162 @@ Comment: On average, cases with White victim were more likely to be solved (OR >
 
 
 ### Problem 2
+
+Read and clean data.
+
+* The column names are tidy so no need to do anything.
+* Looks like no na's.
+* Make sure factor variables are factors.
+* Convert units: (pounds to grams, inches to centimeters).
+
+```{r, message = FALSE}
+baby_df = 
+  read_csv("./data/birthweight.csv") %>% 
+  mutate(
+    babysex = factor(babysex),
+    frace = factor(frace),
+    malform = factor(malform),
+    mrace = factor(mrace),
+    delwt = delwt * 28.35,
+    mheight = mheight * 2.54,
+    ppwt = ppwt * 28.35,
+    wtgain = wtgain * 28.35
+  )
+```
+
+Create two required model first.
+
+```{r}
+model_len_ges = lm(bwt ~ blength + gaweeks, data = baby_df)
+model_len_ges %>% 
+  broom::tidy() %>% 
+  knitr::kable(digits = 3)
+
+model_head_len_sex = lm(bwt ~ bhead * blength * babysex, data = baby_df)
+model_head_len_sex %>% 
+  broom::tidy() %>% 
+  knitr::kable(digits = 3)
+```
+
+A plot of model residuals against fitted values for the first model: length at birth and gestational age as predictors (main effects only).
+
+```{r}
+baby_df %>% 
+  select(bwt, blength, gaweeks) %>% 
+  modelr::add_residuals(model_len_ges) %>% 
+  modelr::add_predictions(model_len_ges) %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point()
+```
+
+A plot of model residuals against fitted values for the second model: head circumference, length at birth, sex, and all interactions (including the three-way interaction).
+
+```{r}
+baby_df %>% 
+  select(bwt, blength, bhead, babysex) %>% 
+  modelr::add_residuals(model_head_len_sex) %>% 
+  modelr::add_predictions(model_head_len_sex) %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point()
+```
+
+Both required models look good. Now consider my own model.  
+Due to time consuming, I choose variables that I think the most relevant to baby's birth weight, and consider two-way interaction only.
+
+```{r}
+my_mod = lm(
+  bwt ~ (bhead + blength + delwt + mheight + pnumlbw + ppbmi + ppwt + smoken + wtgain)^2, data = baby_df)
+
+baby_df %>% 
+  modelr::add_residuals(my_mod) %>% 
+  modelr::add_predictions(my_mod) %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point()
+```
+
+Comment: some extreme points exist but overall it's good.
+
+Use stepwise regression to get a proper model. I know that it's more appropriate to build a model based on hypothesis, but for the sake of time just use stepwise regression.
+
+```{r, message=FALSE}
+mod_select = step(my_mod, direction='backward')
+```
+
+From the result, get `my_mod` and plot residuals against fitted values.
+
+```{r}
+my_mod2 = lm(bwt ~ bhead + blength + delwt + mheight + ppbmi + ppwt + smoken + 
+    wtgain + bhead:mheight + bhead:ppbmi + bhead:smoken + blength:delwt + 
+    blength:mheight + blength:ppbmi + blength:smoken + delwt:ppbmi + 
+    delwt:wtgain + mheight:ppbmi + mheight:ppwt + ppwt:wtgain, data = baby_df)
+
+baby_df %>% 
+  modelr::add_residuals(my_mod2) %>% 
+  modelr::add_predictions(my_mod2) %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point()
+```
+
+Make a comparison three models in terms of the cross-validated prediction error.  
+Save needed variables only in `mod_df`.  
+Use dataset `cv_mod` to do CV process, save models, and their `rmse`.
+
+```{r}
+mod_df = baby_df %>% 
+  select(bwt, blength, gaweeks, bhead, babysex, delwt, mheight, pnumlbw, ppbmi, ppwt, smoken, wtgain)
+
+cv_mod = 
+  crossv_mc(mod_df, 100) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble))
+
+cv_mod = 
+  cv_mod %>% 
+  mutate(
+    mod_len_ges  = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    mod_head_len_sex     = map(train, ~lm(bwt ~ bhead * blength * babysex, data = .x)),
+    mod_mine = map(train, ~lm(bwt ~ bhead + blength + delwt + mheight + ppbmi + ppwt + smoken + 
+    wtgain + bhead:mheight + bhead:ppbmi + bhead:smoken + blength:delwt + 
+    blength:mheight + blength:ppbmi + blength:smoken + delwt:ppbmi + 
+    delwt:wtgain + mheight:ppbmi + mheight:ppwt + ppwt:wtgain, data = .x))) %>% 
+  mutate(
+    rmse_len_ges = map2_dbl(mod_len_ges, test, ~rmse(model = .x, data = .y)),
+    rmse_head_len_sex    = map2_dbl(mod_head_len_sex, test, ~rmse(model = .x, data = .y)),
+    rmse_mine = map2_dbl(mod_mine, test, ~rmse(model = .x, data = .y)))
+```
+
+Plot the prediction error distribution for each model.
+
+```{r}
+cv_mod %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + geom_violin()
+```
+
+It looks like `head_len_sex` and `mine` models are much better than `len_ges` model. `mine` model is a little bit better than `head_len_sex` model, even thought there is overlapping bewteen them.
+
+
+## Problem 3
+
+Download the data.
+
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
