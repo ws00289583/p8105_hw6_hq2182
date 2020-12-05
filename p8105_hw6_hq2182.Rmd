@@ -162,6 +162,8 @@ model_head_len_sex %>%
   knitr::kable(digits = 3)
 ```
 
+Note the p-value = 0.000 because it's smaller than the minimum display value. Also notice that `bhead:blength` is not significant
+
 A plot of model residuals against fitted values for the first model: length at birth and gestational age as predictors (main effects only).
 
 ```{r}
@@ -172,6 +174,8 @@ baby_df %>%
   ggplot(aes(x = pred, y = resid)) +
   geom_point()
 ```
+
+Comment: there are some wired values, but overall is good.
 
 A plot of model residuals against fitted values for the second model: head circumference, length at birth, sex, and all interactions (including the three-way interaction).
 
@@ -184,8 +188,22 @@ baby_df %>%
   geom_point()
 ```
 
-Both required models look good. Now consider my own model.  
-Due to time consuming, I choose variables that I think the most relevant to baby's birth weight, and consider two-way interaction only.
+Comment: there are some wired values as well, but overall is good.
+
+Both required models are good. Now consider my own model.  
+For the sake of time, I choose variables that I assume to be the most relevant to baby's birth weight, and consider two-way interaction only.
+
+Variables include:
+
+* `bhead`
+* `blength`
+* `delwt`
+* `mheight`
+* `pnumlbw`
+* `ppbmi`
+* `ppwt`
+* `smoken`
+* `wtgain`
 
 ```{r}
 my_mod = lm(
@@ -198,15 +216,15 @@ baby_df %>%
   geom_point()
 ```
 
-Comment: some extreme points exist but overall it's good.
+Comment: some extreme points exist but still acceptable.
 
 Use stepwise regression to get a proper model. I know that it's more appropriate to build a model based on hypothesis, but for the sake of time just use stepwise regression.
 
-```{r, message=FALSE}
+```{r, echo=TRUE, results='hide'}
 mod_select = step(my_mod, direction='backward')
 ```
 
-From the result, get `my_mod` and plot residuals against fitted values.
+Copy and paste the result, get `my_mod` and plot residuals against fitted values.
 
 ```{r}
 my_mod2 = lm(bwt ~ bhead + blength + delwt + mheight + ppbmi + ppwt + smoken + 
@@ -220,6 +238,8 @@ baby_df %>%
   ggplot(aes(x = pred, y = resid)) +
   geom_point()
 ```
+
+Comment: the new residual plot is almost identical to the previous one. It's still acceptable.
 
 Make a comparison three models in terms of the cross-validated prediction error.  
 Save needed variables only in `mod_df`.  
@@ -285,7 +305,12 @@ weather_df =
   select(name, id, everything())
 ```
 
-Focus on a simple linear regression with `tmax` as the response and `tmin` as the predictor.
+Focus on a simple linear regression with `tmax` as the response and `tmin` as the predictor.  
+Use `bootsrap` to generate 5000 samples;  
+Fit the linear regression;  
+Extract `r.squared` value of each sample;  
+Compute common logarithm of product of beta_zero and beta_one, then save as variable `log_b1b2`;  
+All results are saved in dataset `est_df`.
 
 ```{r}
 weather_df =
@@ -331,6 +356,8 @@ est_df %>%
   ggplot(aes(x = r.squared)) + geom_density()
 ```
 
+Comment: the distribution of `r.squared` looks normal but skewed a little bit to the left. Furthermore, the shape is too "thin".
+
 Second, plot distribution of `log_b1b2`.
 
 ```{r}
@@ -339,3 +366,4 @@ est_df %>%
   ggplot(aes(x = log_b1b2)) + geom_density()
 ```
 
+Comment: the distribution of `log_b1b2` looks more normal but still skewed to the left. However, it's impossible to have a perfect normal distribution.
