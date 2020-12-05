@@ -271,7 +271,7 @@ It looks like `head_len_sex` and `mine` models are much better than `len_ges` mo
 
 Download the data.
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
 weather_df = 
   rnoaa::meteo_pull_monitors(
     c("USW00094728"),
@@ -284,3 +284,58 @@ weather_df =
     tmax = tmax / 10) %>%
   select(name, id, everything())
 ```
+
+Focus on a simple linear regression with `tmax` as the response and `tmin` as the predictor.
+
+```{r}
+weather_df =
+  weather_df %>% 
+  select(tmax, tmin)
+
+est_df = weather_df %>% 
+  modelr::bootstrap(n = 5000) %>% 
+  mutate(models = map(strap, ~lm(tmax ~ tmin, data = .x) ),
+         results1 = map(models, broom::tidy),
+         results2 = map(models, broom::glance)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results1, results2) %>% 
+  select(.id, term, estimate, r.squared) %>% 
+  group_by(.id) %>% 
+  mutate(
+    log_b1b2 = log10(prod(estimate))
+  ) %>% 
+  ungroup()
+```
+
+Identify the 2.5% and 97.5% quantiles to provide a 95% confidence interval.  
+Note that only one `r.squared` and one `log_b1b2` for each sample.
+
+```{r}
+est_df %>% 
+  filter(term == "tmin") %>% 
+  summarize(
+    rsqr_ci_lower = quantile(r.squared, 0.025),
+    rsqr_ci_upper = quantile(r.squared, 0.975),
+    log_ci_lower = quantile(log_b1b2, 0.025),
+    log_ci_upper = quantile(log_b1b2, 0.975)
+  )
+```
+
+
+Plot the distribution of estimates.  
+Firstly, plot distribution of `r.squared`.
+
+```{r}
+est_df %>% 
+  filter(term == "tmin") %>% 
+  ggplot(aes(x = r.squared)) + geom_density()
+```
+
+Second, plot distribution of `log_b1b2`.
+
+```{r}
+est_df %>% 
+  filter(term == "tmin") %>% 
+  ggplot(aes(x = log_b1b2)) + geom_density()
+```
+
